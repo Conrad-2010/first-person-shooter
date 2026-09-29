@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Pixel Shooter</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #000;
+      font-family: monospace;
+    }
+    #crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 12px;
+      height: 12px;
+      margin-top: -6px;
+      margin-left: -6px;
+      border: 2px solid rgba(255, 255, 255, 0.8);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    #hud {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      color: #00ff00;
+      font-size: 18px;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 10px 15px;
+      border: 1px solid #00ff00;
+    }
+    #instructions {
+      position: absolute;
+      top: 50%;
+      width: 100%;
+      text-align: center;
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="crosshair"></div>
+  <div id="hud">AMMO: <span id="ammo">30</span> | SCORE: <span id="score">0</span></div>
+  <div id="instructions">CLICK TO PLAY<br/><span style="font-size: 16px;">WASD = Move | Mouse = Look | Left Click = Shoot</span></div>
+
+  <!-- Three.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <script>
+    let scene, camera, renderer;
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+    let prevTime = performance.now();
+    const velocity = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+
+    let ammo = 30;
+    let score = 0;
+    const targets = [];
+
+    // Pixel Canvas Texture Creator (Generates Retro Sprites Programmatically)
+    function createPixelTexture(colorHex) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 16;
+      canvas.height = 16;
+      const ctx = canvas.getContext('2d');
+
+      // Base character fill
+      ctx.fillStyle = colorHex;
+      ctx.fillRect(2, 2, 12, 12);
+      
+      // Pixel Eyes & Face detail
+      ctx.fillStyle = '#000';
+      ctx.fillRect(4, 5, 3, 3);
+      ctx.fillRect(9, 5, 3, 3);
+      ctx.fillRect(5, 10, 6, 2);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.magFilter = THREE.NearestFilter; // Preserves sharp pixel edges
+      texture.minFilter = THREE.NearestFilter;
+      return texture;
+    }
+
+    function init() {
+      // 1. Setup Scene & Camera
+      scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x101015, 0.03);
+
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.y = 1.6; // Eye level
+
+      // 2. Setup Pixelated Renderer
+      renderer = new THREE.WebGLRenderer({ antialias: false });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(0.5); // Downscales resolution for pixelated feel
+      document.body.appendChild(renderer.domElement);
+
+      // 3. Lighting
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+      scene.add(ambientLight);
+
+      const pointLight = new THREE.PointLight(0x00ff00, 1, 15);
+      camera.add(pointLight);
+      scene.add(camera);
+
+      // 4. Grid Floor (3D World environment)
+      const floorGeo = new THREE.PlaneGeometry(100, 100);
+      const floorMat = new THREE.MeshBasicMaterial({ color: 0x222222, wireframe: true });
+      const floor = new THREE.Mesh(floorGeo, floorMat);
+      floor.rotation.x = -Math.PI / 2;
+      scene.add(floor);
+
+      // 5. Spawn 2D Pixel Characters in 3D Space
+      const pixelMaterial = new THREE.SpriteMaterial({
+        map: createPixelTexture('#ff3333'),
+        transparent: true
+      });
+
+      for (let i = 0; i < 15; i++) {
+        const sprite = new THREE.Sprite(pixelMaterial);
+        sprite.scale.set(1.5, 1.5, 1);
+        sprite.position.set(
+          (Math.random() - 0.5) * 40,
+          0.75,
+          (Math.random() - 0.5) * 40
+        );
+        scene.add(sprite);
+        targets.push(sprite);
+      }
+
+      // Event Listeners
+      document.addEventListener('keydown', onKeyDown);
+      document.addEventListener('keyup', onKeyUp);
+      document.addEventListener('click', onClick);
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    // Controls
+    function onKeyDown(e) {
+      switch (e.code) {
+        case 'KeyW': moveForward = true; break;
+        case 'KeyS': moveBackward = true; break;
+        case 'KeyA': moveLeft = true; break;
+        case 'KeyD': moveRight = true; break;
+      }
+    }
+
+    function onKeyUp(e) {
+      switch (e.code) {
+        case 'KeyW': moveForward = false; break;
+        case 'KeyS': moveBackward = false; break;
+        case 'KeyA': moveLeft = false; break;
+        case 'KeyD': moveRight = false; break;
+      }
+    }
+
+    // Pointer Lock & Shooting
+    const instructions = document.getElementById('instructions');
+
+    instructions.addEventListener('click', () => {
+      document.body.requestPointerLock();
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement === document.body) {
+        instructions.style.display = 'none';
+      } else {
+        instructions.style.display = 'block';
+      }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement === document.body) {
+        camera.rotation.y -= e.movementX * 0.002;
+      }
+    });
+
+    function onClick() {
+      if (document.pointerLockElement !== document.body) return;
+      if (ammo <= 0) return;
+
+      ammo--;
+      document.getElementById('ammo').innerText = ammo;
+
+      // Raycast shooting mechanism
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+      const intersects = raycaster.intersectObjects(targets);
+
+      if (intersects.length > 0) {
+        const hitTarget = intersects[0].object;
+        scene.remove(hitTarget);
+        targets.splice(targets.indexOf(hitTarget), 1);
+        score += 100;
+        document.getElementById('score').innerText = score;
+      }
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    // Game Loop
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const time = performance.now();
+      const delta = (time - prevTime) / 1000;
+
+      // Movement Physics
+      velocity.x -= velocity.x * 10.0 * delta;
+      velocity.z -= velocity.z * 10.0 * delta;
+
+      direction.z = Number(moveForward) - Number(moveBackward);
+      direction.x = Number(moveRight) - Number(moveLeft);
+      direction.normalize();
+
+      if (moveForward || moveBackward) velocity.z -= direction.z * 40.0 * delta;
+      if (moveLeft || moveRight) velocity.x -= direction.x * 40.0 * delta;
+
+      camera.translateX(-velocity.x * delta);
+      camera.translateZ(velocity.z * delta);
+      camera.position.y = 1.6; // Keep locked on horizontal plane
+
+      prevTime = time;
+      renderer.render(scene, camera);
+    }
+
+    init();
+    animate();
+  </script>
+</body>
+</html>
